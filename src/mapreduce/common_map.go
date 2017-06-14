@@ -1,7 +1,11 @@
 package mapreduce
 
 import (
+	"encoding/json"
+	"fmt"
 	"hash/fnv"
+	"io/ioutil"
+	"os"
 )
 
 // doMap manages one map task: it reads one of the input files
@@ -14,6 +18,36 @@ func doMap(
 	nReduce int, // the number of reduce task that will be run ("R" in the paper)
 	mapF func(file string, contents string) []KeyValue,
 ) {
+	inContent, err := ioutil.ReadFile(inFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ReadFile error!")
+		return
+	}
+	fmt.Println(nReduce)
+	inContentString := string(inContent)
+	//fmt.Print(inContentString)
+	keyValue := mapF(inFile, inContentString)
+	partitions := make([]*json.Encoder, nReduce, nReduce)
+	partitionsHandler := make([]*os.File, nReduce, nReduce)
+	for id := 0; id < nReduce; id++ {
+		name := reduceName(jobName, mapTaskNumber, id)
+		partitionsHandler[id], err = os.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			fmt.Println(err)
+		}
+		partitions[id] = json.NewEncoder(partitionsHandler[id])
+	}
+	for _, keyValueSingle := range keyValue {
+		_ = partitions[ihash(keyValueSingle.Key)%nReduce].Encode(&keyValueSingle)
+		//if err != nil {
+		//	fmt.Fprint(err)
+		//	return
+		//}
+	}
+	for _, handler := range partitionsHandler {
+		handler.Close()
+	}
+
 	//
 	// You will need to write this function.
 	//
