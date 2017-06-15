@@ -30,21 +30,15 @@ func doReduce(
 		io.Copy(midContentBuf, f)
 		f.Close()
 	}
-	midContent := midContentBuf.Bytes()
-	reader := bytes.NewReader(midContent)
-	decoder := json.NewDecoder(reader)
+	decoder := json.NewDecoder(bytes.NewReader(midContentBuf.Bytes()))
 	var kv KeyValue
-	keyValues := make([]KeyValue, 0, 0)
+	keyValueMap := make(map[string][]string)
 	for {
 		err := decoder.Decode(&kv)
 		if err == io.EOF {
 			break
 		}
-		keyValues = append(keyValues, kv)
-	}
-	keyValueMap := make(map[string][]string)
-	for _, keyValueSingle := range keyValues {
-		keyValueMap[keyValueSingle.Key] = append(keyValueMap[keyValueSingle.Key], keyValueSingle.Value)
+		keyValueMap[kv.Key] = append(keyValueMap[kv.Key], kv.Value)
 	}
 	keys := []string{}
 	for keyValueSingle := range keyValueMap {
@@ -53,6 +47,7 @@ func doReduce(
 	sort.Strings(keys)
 	answerFileName := mergeName(jobName, reduceTaskNumber)
 	answerFile, err := os.OpenFile(answerFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	defer answerFile.Close()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return
@@ -61,5 +56,4 @@ func doReduce(
 	for _, key := range keys {
 		encoder.Encode(KeyValue{key, reduceF(key, keyValueMap[key])})
 	}
-	answerFile.Close()
 }

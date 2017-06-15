@@ -23,13 +23,11 @@ func doMap(
 		fmt.Fprintln(os.Stderr, err)
 		return
 	}
-	inContentString := string(inContent)
-	keyValue := mapF(inFile, inContentString)
+	keyValue := mapF(inFile, string(inContent))
 	partitions := make([]*json.Encoder, nReduce, nReduce)
 	partitionsHandler := make([]*os.File, nReduce, nReduce)
 	for id := 0; id < nReduce; id++ {
-		name := reduceName(jobName, mapTaskNumber, id)
-		partitionsHandler[id], err = os.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		partitionsHandler[id], err = os.OpenFile(reduceName(jobName, mapTaskNumber, id), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
