@@ -25,22 +25,18 @@ func doMap(
 	}
 	keyValue := mapF(inFile, string(inContent))
 	partitions := make([]*json.Encoder, nReduce, nReduce)
-	partitionsHandler := make([]*os.File, nReduce, nReduce)
 	for id := 0; id < nReduce; id++ {
-		partitionsHandler[id], err = os.OpenFile(reduceName(jobName, mapTaskNumber, id), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		handler, err := os.OpenFile(reduceName(jobName, mapTaskNumber, id), os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-		partitions[id] = json.NewEncoder(partitionsHandler[id])
+		defer handler.Close()
+		partitions[id] = json.NewEncoder(handler)
 	}
 	for _, keyValueSingle := range keyValue {
 		_ = partitions[ihash(keyValueSingle.Key)%nReduce].Encode(&keyValueSingle)
 	}
-	for _, handler := range partitionsHandler {
-		handler.Close()
-	}
-
 }
 
 func ihash(s string) int {

@@ -46,7 +46,7 @@ func doReduce(
 	}
 	sort.Strings(keys)
 	answerFileName := mergeName(jobName, reduceTaskNumber)
-	answerFile, err := os.OpenFile(answerFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	answerFile, err := os.OpenFile(answerFileName, os.O_CREATE|os.O_WRONLY, 0644)
 	defer answerFile.Close()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
