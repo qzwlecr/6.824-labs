@@ -18,6 +18,8 @@ package raft
 //
 
 import (
+	"bytes"
+	"encoding/gob"
 	"labrpc"
 	"math/rand"
 	"sync"
@@ -90,12 +92,24 @@ func (rf *Raft) GetLastIndex() int {
 }
 
 func (rf *Raft) persist() {
+	w := new(bytes.Buffer)
+	e := gob.NewEncoder(w)
+	e.Encode(rf.currentTerm)
+	e.Encode(rf.votedFor)
+	e.Encode(rf.logs)
+	data := w.Bytes()
+	rf.persister.SaveRaftState(data)
 }
 
 func (rf *Raft) readPersist(data []byte) {
 	if data == nil || len(data) < 1 {
 		return
 	}
+	r := bytes.NewBuffer(data)
+	d := gob.NewDecoder(r)
+	d.Decode(&rf.currentTerm)
+	d.Decode(&rf.votedFor)
+	d.Decode(&rf.logs)
 }
 
 type RequestVoteArgs struct {
@@ -111,28 +125,31 @@ type RequestVoteReply struct {
 }
 
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
+	defer rf.persist()
 	reply.VoteGranted = false
 	if args.Term < rf.currentTerm {
 		reply.Term = rf.currentTerm
 		return
 	}
 	if args.Term > rf.currentTerm {
+		//rf.mu.Lock()
 		rf.currentTerm = args.Term
 		rf.state = STATE_FOLLOWER
 		DPrintf("set %v's state to follower3", rf.me)
 		rf.votedFor = -1
+		//rf.mu.Unlock()
 	}
 	reply.Term = rf.currentTerm
 	if rf.GetLastTerm() < args.LastLogTerm || (rf.GetLastTerm() == args.LastLogTerm && rf.GetLastIndex() <= args.LastLogIndex) {
 		if rf.votedFor == -1 || rf.votedFor == args.CandidateIndex {
+			//rf.mu.Lock()
 			rf.chanGrantVote <- true
 			rf.state = STATE_FOLLOWER
 			DPrintf("set %v's state to follower4", rf.me)
 			reply.VoteGranted = true
 			//DPrintf("%v vote %v", rf.me, args.CandidateIndex)
 			rf.votedFor = args.CandidateIndex
+			//rf.mu.Unlock()
 		}
 	}
 	return
@@ -140,20 +157,23 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
+	defer rf.persist()
 	if ok {
 		if rf.state != STATE_CANDIDATE || args.Term != rf.currentTerm {
 			return ok
 		}
 		if reply.Term > rf.currentTerm {
+			//rf.mu.Lock()
 			rf.currentTerm = reply.Term
 			rf.state = STATE_FOLLOWER
 			DPrintf("set %v's state to follower5", rf.me)
 			rf.votedFor = -1
+			//rf.mu.Unlock()
 		}
 		if reply.VoteGranted {
+			rf.mu.Lock()
 			rf.voteCount++
+			rf.mu.Unlock()
 			//DPrintf("%v's voteCount = %v", rf.me, rf.voteCount)
 			if rf.state == STATE_CANDIDATE && rf.voteCount > len(rf.peers)/2 {
 				rf.state = STATE_FOLLOWER
@@ -170,9 +190,7 @@ func (rf *Raft) BroadcastRequestVote() {
 	if rf.state != STATE_CANDIDATE {
 		return
 	}
-	rf.mu.Lock()
 	args := &RequestVoteArgs{CandidateIndex: rf.me, Term: rf.currentTerm, LastLogTerm: rf.GetLastTerm(), LastLogIndex: rf.GetLastIndex()}
-	rf.mu.Unlock()
 	for k := range rf.peers {
 		if k != rf.me && rf.state == STATE_CANDIDATE {
 			go func(k int) {
@@ -199,8 +217,7 @@ type AppendEntriesReply struct {
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
+	defer rf.persist()
 	reply.Success = false
 	if args.Term < rf.currentTerm {
 		reply.Term = rf.currentTerm
@@ -246,8 +263,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
+	defer rf.persist()
 	if ok {
 		if reply.Term > rf.currentTerm {
 			rf.currentTerm = reply.Term
@@ -273,8 +289,6 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 }
 
 func (rf *Raft) BroadcastAppendEntries() {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
 	if rf.state != STATE_LEADER {
 		return
 	}
@@ -299,6 +313,10 @@ func (rf *Raft) BroadcastAppendEntries() {
 	for k := range rf.peers {
 		if k != rf.me && rf.state == STATE_LEADER {
 			logIndex := rf.nextIndex[k] - 1
+			if logIndex > rf.GetLastIndex() {
+				continue
+			}
+			//DPrintf("%v %v Log index: %v with larges logindex = %v", rf.me, k, logIndex, rf.GetLastIndex())
 			logTerm := rf.logs[logIndex].Term
 			args := &AppendEntriesArgs{Term: rf.currentTerm, LeaderIndex: rf.me, LeaderCommit: rf.commitIndex, LastLogIndex: logIndex, LastLogTerm: logTerm}
 			args.Entries = make([]Log, len(rf.logs[args.LastLogIndex+1:]))
@@ -313,13 +331,12 @@ func (rf *Raft) BroadcastAppendEntries() {
 
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index := -1
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
 	term := rf.currentTerm
 	isLeader := rf.state == STATE_LEADER
 	if isLeader {
 		index = rf.GetLastIndex() + 1
 		rf.logs = append(rf.logs, Log{Term: term, Command: command})
+		rf.persist()
 	}
 	return index, term, isLeader
 }
@@ -344,24 +361,20 @@ func (rf *Raft) FollowerState() {
 	select {
 	case <-rf.chanHeartBeat:
 	case <-rf.chanGrantVote:
-	case <-time.After(time.Duration(rand.Intn(150)+150) * time.Millisecond):
-		rf.mu.Lock()
+	case <-time.After(time.Duration(rand.Intn(150)+300) * time.Millisecond):
 		DPrintf("set %v's state to candidate", rf.me)
 		rf.state = STATE_CANDIDATE
-		rf.mu.Unlock()
 	}
 }
 
 func (rf *Raft) CandidateState() {
-	rf.mu.Lock()
 	rf.currentTerm++
 	rf.votedFor = rf.me
 	rf.voteCount = 1
-	rf.mu.Unlock()
+	rf.persist()
 	go rf.BroadcastRequestVote()
 	select {
 	case <-rf.chanBecomeLeader:
-		rf.mu.Lock()
 		rf.state = STATE_LEADER
 		DPrintf("set %v's state to leader", rf.me)
 		rf.nextIndex = []int{}
@@ -370,13 +383,10 @@ func (rf *Raft) CandidateState() {
 			rf.nextIndex = append(rf.nextIndex, rf.GetLastIndex()+1)
 			rf.matchIndex = append(rf.matchIndex, 0)
 		}
-		rf.mu.Unlock()
 		rf.BroadcastAppendEntries()
-	case <-time.After(time.Duration(rand.Intn(150)+150) * time.Millisecond):
+	case <-time.After(time.Duration(rand.Intn(150)+300) * time.Millisecond):
 	case <-rf.chanHeartBeat:
-		rf.mu.Lock()
 		rf.state = STATE_FOLLOWER
-		rf.mu.Unlock()
 	}
 }
 
@@ -389,14 +399,12 @@ func (rf *Raft) DoingCommit(applyCh chan ApplyMsg) {
 	for {
 		select {
 		case <-rf.chanCommit:
-			rf.mu.Lock()
 			for i := rf.lastApplied + 1; i <= rf.commitIndex; i++ {
 				msg := ApplyMsg{Index: i, Command: rf.logs[i].Command}
 				DPrintf("%v applied", msg)
 				applyCh <- msg
 				rf.lastApplied = i
 			}
-			rf.mu.Unlock()
 		}
 	}
 }
