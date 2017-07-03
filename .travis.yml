@@ -7,26 +7,26 @@ go:
   - 1.7.x
 
 env:
-  - TEST_NAME="lab2 InitialElection2A"
-  - TEST_NAME="lab2 ReElection2A"
-  - TEST_NAME="lab2 BasicAgree2B"
-  - TEST_NAME="lab2 FailAgree2B"
-  - TEST_NAME="lab2 FailNoAgree2B"
-  - TEST_NAME="lab2 ConcurrentStarts2B"
-  - TEST_NAME="lab2 Rejoin2B"
-  - TEST_NAME="lab2 Backup2B"
-  - TEST_NAME="lab2 Count2B"
-  - TEST_NAME="lab2 Persist12C"
-  - TEST_NAME="lab2 Persist22C"
-  - TEST_NAME="lab2 Persist32C"
-  - TEST_NAME="lab2 Figure82C"
-  - TEST_NAME="lab2 UnreliableAgree2C"
-  - TEST_NAME="lab2 Figure8Unreliable2C"
-  - TEST_NAME="lab2 ReliableChurn2C"
-  - TEST_NAME="lab2 UnreliableChurn2C"
+  - TEST_NAME="lab2 InitialElection2A 100"
+  - TEST_NAME="lab2 ReElection2A 100"
+  - TEST_NAME="lab2 BasicAgree2B 100"
+  - TEST_NAME="lab2 FailAgree2B 100"
+  - TEST_NAME="lab2 FailNoAgree2B 100"
+  - TEST_NAME="lab2 ConcurrentStarts2B 100"
+  - TEST_NAME="lab2 Rejoin2B 100"
+  - TEST_NAME="lab2 Backup2B 100"
+  - TEST_NAME="lab2 Count2B 100"
+  - TEST_NAME="lab2 Persist12C 100"
+  - TEST_NAME="lab2 Persist22C 100"
+  - TEST_NAME="lab2 Persist32C 100"
+  - TEST_NAME="lab2 Figure82C 50"
+  - TEST_NAME="lab2 UnreliableAgree2C 100"
+  - TEST_NAME="lab2 Figure8Unreliable2C 50"
+  - TEST_NAME="lab2 ReliableChurn2C 100"
+  - TEST_NAME="lab2 UnreliableChurn2C 100"
 
 script:
- - ./test.sh $TEST_NAME 100
+ - ./test.sh $TEST_NAME
 
 branches:
   only:
