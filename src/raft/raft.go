@@ -132,24 +132,20 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		return
 	}
 	if args.Term > rf.currentTerm {
-		//rf.mu.Lock()
 		rf.currentTerm = args.Term
 		rf.state = STATE_FOLLOWER
 		DPrintf("set %v's state to follower3", rf.me)
 		rf.votedFor = -1
-		//rf.mu.Unlock()
 	}
 	reply.Term = rf.currentTerm
 	if rf.GetLastTerm() < args.LastLogTerm || (rf.GetLastTerm() == args.LastLogTerm && rf.GetLastIndex() <= args.LastLogIndex) {
 		if rf.votedFor == -1 || rf.votedFor == args.CandidateIndex {
-			//rf.mu.Lock()
 			rf.chanGrantVote <- true
 			rf.state = STATE_FOLLOWER
 			DPrintf("set %v's state to follower4", rf.me)
 			reply.VoteGranted = true
 			//DPrintf("%v vote %v", rf.me, args.CandidateIndex)
 			rf.votedFor = args.CandidateIndex
-			//rf.mu.Unlock()
 		}
 	}
 	return
@@ -163,12 +159,10 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 			return ok
 		}
 		if reply.Term > rf.currentTerm {
-			//rf.mu.Lock()
 			rf.currentTerm = reply.Term
 			rf.state = STATE_FOLLOWER
 			DPrintf("set %v's state to follower5", rf.me)
 			rf.votedFor = -1
-			//rf.mu.Unlock()
 		}
 		if reply.VoteGranted {
 			rf.mu.Lock()
@@ -265,14 +259,14 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
 	defer rf.persist()
 	if ok {
+		if rf.state != STATE_LEADER || args.Term != rf.currentTerm {
+			return ok
+		}
 		if reply.Term > rf.currentTerm {
 			rf.currentTerm = reply.Term
 			rf.state = STATE_FOLLOWER
 			DPrintf("set %v's state to follower1", rf.me)
 			rf.votedFor = -1
-			return ok
-		}
-		if rf.state != STATE_LEADER || args.Term != rf.currentTerm {
 			return ok
 		}
 		if reply.Success {
@@ -283,7 +277,6 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 		} else {
 			rf.nextIndex[server] = reply.NextIndex
 		}
-
 	}
 	return ok
 }
@@ -369,6 +362,7 @@ func (rf *Raft) FollowerState() {
 }
 
 func (rf *Raft) CandidateState() {
+	defer rf.persist()
 	rf.currentTerm++
 	rf.votedFor = rf.me
 	rf.voteCount = 1
@@ -392,7 +386,7 @@ func (rf *Raft) CandidateState() {
 }
 
 func (rf *Raft) LeaderState() {
-	go rf.BroadcastAppendEntries()
+	rf.BroadcastAppendEntries()
 	time.Sleep(50 * time.Millisecond)
 }
 
