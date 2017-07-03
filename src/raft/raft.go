@@ -295,7 +295,7 @@ func (rf *Raft) BroadcastAppendEntries() {
 	//DPrintf("%v is broadcasting appendentries\n", rf.me)
 	commit := rf.commitIndex
 	last := rf.GetLastIndex()
-	for i := commit + 1; i <= last; i++ {
+	for i := last; i >= rf.commitIndex; i-- {
 		serverCount := 1
 		for j := range rf.peers {
 			if j != rf.me && rf.matchIndex[j] >= i && rf.logs[i].Term == rf.currentTerm {
@@ -304,6 +304,7 @@ func (rf *Raft) BroadcastAppendEntries() {
 		}
 		if serverCount*2 > len(rf.peers) {
 			commit = i
+			break
 		}
 	}
 	if commit != rf.commitIndex {
@@ -361,7 +362,7 @@ func (rf *Raft) FollowerState() {
 	select {
 	case <-rf.chanHeartBeat:
 	case <-rf.chanGrantVote:
-	case <-time.After(time.Duration(rand.Intn(150)+300) * time.Millisecond):
+	case <-time.After(time.Duration(rand.Intn(500)+800) * time.Millisecond):
 		DPrintf("set %v's state to candidate", rf.me)
 		rf.state = STATE_CANDIDATE
 	}
@@ -384,7 +385,7 @@ func (rf *Raft) CandidateState() {
 			rf.matchIndex = append(rf.matchIndex, 0)
 		}
 		rf.BroadcastAppendEntries()
-	case <-time.After(time.Duration(rand.Intn(150)+300) * time.Millisecond):
+	case <-time.After(time.Duration(rand.Intn(500)+800) * time.Millisecond):
 	case <-rf.chanHeartBeat:
 		rf.state = STATE_FOLLOWER
 	}
