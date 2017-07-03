@@ -396,12 +396,14 @@ func (rf *Raft) DoingCommit(applyCh chan ApplyMsg) {
 	for {
 		select {
 		case <-rf.chanCommit:
+			rf.mu.Lock()
 			for i := rf.lastApplied + 1; i <= rf.commitIndex; i++ {
 				msg := ApplyMsg{Index: i, Command: rf.logs[i].Command}
 				DPrintf("%v applied", msg)
 				applyCh <- msg
 				rf.lastApplied = i
 			}
+			rf.mu.Unlock()
 		}
 	}
 }
