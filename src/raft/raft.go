@@ -325,6 +325,8 @@ func (rf *Raft) BroadcastAppendEntries() {
 
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index := -1
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	term := rf.currentTerm
 	isLeader := rf.state == STATE_LEADER
 	if isLeader {
