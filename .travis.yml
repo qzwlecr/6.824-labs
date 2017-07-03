@@ -1,0 +1,33 @@
+dist: trusty
+language: go
+go_import_path: github.com/qzwlecr/6.824-Labs
+sudo: false
+
+go:
+  - 1.7.x
+
+env:
+  - TEST_NAME="lab2 InitialElection2A"
+  - TEST_NAME="lab2 ReElection2A"
+  - TEST_NAME="lab2 BasicAgree2B"
+  - TEST_NAME="lab2 FailAgree2B"
+  - TEST_NAME="lab2 FailNoAgree2B"
+  - TEST_NAME="lab2 ConcurrentStarts2B"
+  - TEST_NAME="lab2 Rejoin2B"
+  - TEST_NAME="lab2 Backup2B"
+  - TEST_NAME="lab2 Count2B"
+  - TEST_NAME="lab2 Persist12C"
+  - TEST_NAME="lab2 Persist22C"
+  - TEST_NAME="lab2 Persist32C"
+  - TEST_NAME="lab2 Figure82C"
+  - TEST_NAME="lab2 UnreliableAgree2C"
+  - TEST_NAME="lab2 Figure8Unreliable2C"
+  - TEST_NAME="lab2 ReliableChurn2C"
+  - TEST_NAME="lab2 UnreliableChurn2C"
+
+script:
+ - ./test.sh $TEST_NAME 100
+
+branches:
+  only:
+  - master
