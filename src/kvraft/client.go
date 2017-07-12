@@ -3,11 +3,14 @@ package raftkv
 import "labrpc"
 import "crypto/rand"
 import "math/big"
-
+import "sync"
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
 	// You will have to modify this struct.
+	ID        int64
+	SeenID int64
+	mu        sync.Mutex
 }
 
 func nrand() int64 {
@@ -20,6 +23,8 @@ func nrand() int64 {
 func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
+	ck.ID = nrand()
+	ck.SeenID = 0
 	// You'll have to add code here.
 	return ck
 }
@@ -37,9 +42,23 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 // arguments. and reply must be passed as a pointer.
 //
 func (ck *Clerk) Get(key string) string {
-
-	// You will have to modify this function.
-	return ""
+	args := GetArgs{
+		Key: key,
+		ID:  ck.ID,
+	}
+	ck.mu.Lock()
+	args.SeenID = ck.SeenID
+	ck.SeenID++
+	ck.mu.Unlock()
+	for {
+		for _, v := range ck.servers {
+			var reply GetReply
+			ok := v.Call("RaftKV.Get", &args, &reply)
+			if ok && reply.WrongLeader == false {
+				return reply.Value
+			}
+		}
+	}
 }
 
 //
@@ -53,7 +72,25 @@ func (ck *Clerk) Get(key string) string {
 // arguments. and reply must be passed as a pointer.
 //
 func (ck *Clerk) PutAppend(key string, value string, op string) {
-	// You will have to modify this function.
+	args := PutAppendArgs{
+		Key: key,
+		Value: value,
+		Op:op,
+		ID : ck.ID,
+	};
+	ck.mu.Lock()
+	args.SeenID = ck.SeenID
+	ck.SeenID++
+	ck.mu.Unlock()
+	for{
+		for _,v := range ck.servers {
+			var reply GetReply
+			ok := v.Call("RaftKV.PutAppend", &args, &reply)
+			if ok && reply.WrongLeader == false{
+				return
+			}
+		}
+	}
 }
 
 func (ck *Clerk) Put(key string, value string) {

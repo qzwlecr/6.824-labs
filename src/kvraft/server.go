@@ -6,6 +6,7 @@ import (
 	"log"
 	"raft"
 	"sync"
+	"time"
 )
 
 const Debug = 0
@@ -17,11 +18,12 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
-
 type Op struct {
-	// Your definitions here.
-	// Field names must start with capital letters,
-	// otherwise RPC will break.
+	Kind   string
+	Key    string
+	Value  string
+	ID     int64
+	SeenID int64
 }
 
 type RaftKV struct {
@@ -32,16 +34,66 @@ type RaftKV struct {
 
 	maxraftstate int // snapshot if log grows this big
 
-	// Your definitions here.
+	db      map[string]string
+	opMap   map[int64]int64
+	chanMap map[int]chan Op
 }
 
+func (kv *RaftKV) AppendEntries(entry Op) bool {
+	index, _, isLeader := kv.rf.Start(entry)
+	if !isLeader {
+		return false
+	}
+	ch, ok := kv.chanMap[index]
+	if !ok {
+		ch = make(chan Op)
+		kv.chanMap[index] = ch
+	}
+	select {
+	case op := <-ch:
+		return op == entry
+	case <-time.After(1000 * time.Millisecond):
+		return false
+	}
+}
 
 func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
-	// Your code here.
+	entry := Op{
+		Kind:   "Get",
+		Key:    args.Key,
+		ID:     args.ID,
+		SeenID: args.SeenID,
+	}
+	ok := kv.AppendEntries(entry)
+	kv.mu.Lock()
+	if !ok {
+		reply.WrongLeader = true
+	} else {
+		reply.WrongLeader = false
+
+		reply.Err = OK
+		reply.Value = kv.db[args.Key]
+		kv.opMap[args.ID] = args.SeenID
+	}
+	kv.mu.Unlock()
+
 }
 
 func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
-	// Your code here.
+	entry := Op{
+		Kind:   args.Op,
+		Key:    args.Key,
+		Value:  args.Value,
+		ID:     args.ID,
+		SeenID: args.SeenID,
+	}
+	ok := kv.AppendEntries(entry)
+	if !ok {
+		reply.WrongLeader = true
+	} else {
+		reply.WrongLeader = false
+		reply.Err = OK
+	}
 }
 
 //
@@ -51,8 +103,8 @@ func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 // turn off debug output from this instance.
 //
 func (kv *RaftKV) Kill() {
+	DPrintf("%v has been killed", kv.me)
 	kv.rf.Kill()
-	// Your code here, if desired.
 }
 
 //
@@ -68,6 +120,38 @@ func (kv *RaftKV) Kill() {
 // StartKVServer() must return quickly, so it should start goroutines
 // for any long-running work.
 //
+
+func (kv *RaftKV) DoingStateMachine() {
+	for msg := range kv.applyCh {
+		kv.mu.Lock()
+		op := msg.Command.(Op)
+		lastID, ok := kv.opMap[op.ID]
+		if !ok || lastID < op.SeenID {
+			switch op.Kind {
+			case "Put":
+				kv.db[op.Key] = op.Value
+			case "Append":
+				kv.db[op.Key] += op.Value
+			}
+			kv.opMap[op.ID] = op.SeenID
+		}else{
+			DPrintf("Found duplicated op: %v",msg)
+		}
+		if ch, ok := kv.chanMap[msg.Index];ok{
+			select {
+			case <-kv.chanMap[msg.Index]:
+			default:
+			}
+			go func(){
+			ch <- op
+			}()
+		} else {
+			kv.chanMap[msg.Index] = make(chan Op)
+		}
+		kv.mu.Unlock()
+	}
+}
+
 func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister, maxraftstate int) *RaftKV {
 	// call gob.Register on structures you want
 	// Go's RPC library to marshall/unmarshall.
@@ -77,12 +161,13 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.me = me
 	kv.maxraftstate = maxraftstate
 
-	// You may need initialization code here.
-
+	kv.db = make(map[string]string)
+	kv.opMap = make(map[int64]int64)
+	kv.chanMap = make(map[int]chan Op)
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
-	// You may need initialization code here.
+	go kv.DoingStateMachine()
 
 	return kv
 }
