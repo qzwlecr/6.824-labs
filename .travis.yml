@@ -24,6 +24,18 @@ env:
   - TEST_NAME="lab2 Figure8Unreliable2C 50"
   - TEST_NAME="lab2 ReliableChurn2C 100"
   - TEST_NAME="lab2 UnreliableChurn2C 100"
+  - TEST_NAME="lab3 TestBasic 100"
+  - TEST_NAME="lab3 TestConcurrent 100"
+  - TEST_NAME="lab3 TestUnreliable 100"
+  - TEST_NAME="lab3 TestUnreliableOneKey 100"
+  - TEST_NAME="lab3 TestOnePartition 100"
+  - TEST_NAME="lab3 TestManyPartitionsOneClient 100"
+  - TEST_NAME="lab3 TestManyPartitionsManyClients 100"
+  - TEST_NAME="lab3 TestPersistOneClient 100"
+  - TEST_NAME="lab3 TestPersistConcurrent 100"
+  - TEST_NAME="lab3 TestPersistConcurrentUnreliable 100"
+  - TEST_NAME="lab3 TestPersistPartition 100"
+  - TEST_NAME="lab3 TestPersistPartitionUnreliable 100"
 
 script:
  - ./test.sh $TEST_NAME
