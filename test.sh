@@ -10,6 +10,9 @@ case $1 in
     "lab2")
         cd src/raft
         ;;
+    "lab3")
+        cd src/kvraft
+        ;;
     *)
         echo "unknown lab $1"
         exit
