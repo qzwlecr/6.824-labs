@@ -4,13 +4,14 @@ import "labrpc"
 import "crypto/rand"
 import "math/big"
 import "sync"
+import mrand "math/rand"
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
 	// You will have to modify this struct.
-	ID        int64
+	leader int
 	SeenID int64
-	mu        sync.Mutex
+	mu     sync.Mutex
 }
 
 func nrand() int64 {
@@ -23,8 +24,7 @@ func nrand() int64 {
 func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
-	ck.ID = nrand()
-	ck.SeenID = 0
+	ck.leader = 0
 	// You'll have to add code here.
 	return ck
 }
@@ -43,20 +43,37 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 //
 func (ck *Clerk) Get(key string) string {
 	args := GetArgs{
-		Key: key,
-		ID:  ck.ID,
+		Key:    key,
+		ID:     nrand(),
+		SeenID: ck.SeenID,
 	}
-	ck.mu.Lock()
-	args.SeenID = ck.SeenID
-	ck.SeenID++
-	ck.mu.Unlock()
+	leader := -1
 	for {
-		for _, v := range ck.servers {
-			var reply GetReply
-			ok := v.Call("RaftKV.Get", &args, &reply)
-			if ok && reply.WrongLeader == false {
-				return reply.Value
+		if leader < 0 {
+			leader = ck.leader
+		} else {
+			next := leader
+			for leader == next {
+				leader = mrand.Intn(len(ck.servers))
 			}
+		}
+		var reply GetReply
+		ok := ck.servers[leader].Call("RaftKV.Get", &args, &reply)
+		if ok {
+			if reply.WrongLeader {
+				DPrintf("Get (ID:%v) error %v", args.ID, reply.Err)
+				continue
+			}
+			if reply.Err != OK {
+				DPrintf("Get (ID:%v) error %v", args.ID, reply.Err)
+				continue
+			}
+			DPrintf("Get (ID:%v) success", args.ID)
+			ck.SeenID = args.ID
+			ck.leader = leader
+			return reply.Value
+		} else {
+			DPrintf("Get (ID:%v) RPC fail", args.ID)
 		}
 	}
 }
@@ -70,25 +87,41 @@ func (ck *Clerk) Get(key string) string {
 // the types of args and reply (including whether they are pointers)
 // must match the declared types of the RPC handler function's
 // arguments. and reply must be passed as a pointer.
-//
 func (ck *Clerk) PutAppend(key string, value string, op string) {
 	args := PutAppendArgs{
-		Key: key,
-		Value: value,
-		Op:op,
-		ID : ck.ID,
-	};
-	ck.mu.Lock()
-	args.SeenID = ck.SeenID
-	ck.SeenID++
-	ck.mu.Unlock()
-	for{
-		for _,v := range ck.servers {
-			var reply GetReply
-			ok := v.Call("RaftKV.PutAppend", &args, &reply)
-			if ok && reply.WrongLeader == false{
-				return
+		Key:    key,
+		Value:  value,
+		ID:     nrand(),
+		Op:     op,
+		SeenID: ck.SeenID,
+	}
+	leader := -1
+	for {
+		if leader < 0 {
+			leader = ck.leader
+		} else {
+			record := leader
+			for leader == record {
+				leader = mrand.Intn(len(ck.servers))
 			}
+		}
+		var reply PutAppendReply
+		ok := ck.servers[leader].Call("RaftKV.PutAppend", &args, &reply)
+		if ok {
+			if reply.WrongLeader {
+				DPrintf("PutAppend (ID:%v) error %v", args.ID, reply.Err)
+				continue
+			}
+			if reply.Err != OK {
+				DPrintf("PutAppend (ID:%v) error %v", args.ID, reply.Err)
+				continue
+			}
+			DPrintf("PutAppend (ID:%v) success", args.ID)
+			ck.SeenID = args.ID
+			ck.leader = leader
+			return
+		} else {
+			DPrintf("PutAppend (ID:%v) RPC fail", args.ID)
 		}
 	}
 }

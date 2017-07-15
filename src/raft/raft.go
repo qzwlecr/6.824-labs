@@ -78,6 +78,8 @@ func (rf *Raft) GetState() (int, bool) {
 
 	var term int
 	var isleader bool
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	term = rf.currentTerm
 	isleader = rf.state == STATE_LEADER
 	return term, isleader
@@ -125,6 +127,8 @@ type RequestVoteReply struct {
 }
 
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	defer rf.persist()
 	reply.VoteGranted = false
 	if args.Term < rf.currentTerm {
@@ -204,6 +208,8 @@ type AppendEntriesReply struct {
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	defer rf.persist()
 	reply.Success = false
 	if args.Term < rf.currentTerm {
@@ -313,13 +319,12 @@ func (rf *Raft) BroadcastAppendEntries() {
 }
 
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
-	index := -1
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	index := rf.GetLastIndex()+1
 	term := rf.currentTerm
 	isLeader := rf.state == STATE_LEADER
 	if isLeader {
-		index = rf.GetLastIndex() + 1
 		rf.logs = append(rf.logs, Log{Term: term, Command: command})
 		rf.persist()
 	}
@@ -346,7 +351,7 @@ func (rf *Raft) FollowerState() {
 	select {
 	case <-rf.chanHeartBeat:
 	case <-rf.chanGrantVote:
-	case <-time.After(time.Duration(rand.Intn(500)+800) * time.Millisecond):
+	case <-time.After(time.Duration(rand.Intn(300)+200) * time.Millisecond):
 		rf.state = STATE_CANDIDATE
 	}
 }
@@ -383,14 +388,12 @@ func (rf *Raft) DoingCommit(applyCh chan ApplyMsg) {
 	for {
 		select {
 		case <-rf.chanCommit:
-			rf.mu.Lock()
 			for i := rf.lastApplied + 1; i <= rf.commitIndex; i++ {
 				msg := ApplyMsg{Index: i, Command: rf.logs[i].Command}
 				DPrintf("%v applied", msg)
 				applyCh <- msg
 				rf.lastApplied = i
 			}
-			rf.mu.Unlock()
 		}
 	}
 }
