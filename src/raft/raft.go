@@ -27,7 +27,7 @@ import (
 )
 
 const (
-	STATE_FOLLOWER = iota
+	STATE_FOLLOWER  = iota
 	STATE_CANDIDATE
 	STATE_LEADER
 )
@@ -227,6 +227,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.NextIndex = rf.GetLastIndex() + 1
 		return
 	}
+	DPrintf("server %v is receiving %v with state %v",rf.me,args,rf.logs)
 	term := rf.logs[args.LastLogIndex].Term
 	if args.LastLogTerm != term {
 		for i := args.LastLogIndex; i >= 0; i-- {
@@ -237,8 +238,23 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		}
 		return
 	}
-	rf.logs = rf.logs[:args.LastLogIndex+1]
-	rf.logs = append(rf.logs, args.Entries...)
+	if args.LastLogIndex+len(args.Entries)>=len(rf.logs){
+		rf.logs = rf.logs[:args.LastLogIndex+1]
+		rf.logs = append(rf.logs, args.Entries...)
+	} else{
+		for i := len(args.Entries) - 1; i >= 0; i-- {
+			//DPrintf("%v with %v",rf.logs[i+args.LastLogIndex+1], args.Entries[i])
+			if i+args.LastLogIndex+1 < len(rf.logs) && rf.logs[i+args.LastLogIndex+1] != args.Entries[i] {
+				rf.logs = rf.logs[:args.LastLogIndex+1];
+				rf.logs = append(rf.logs, args.Entries...)
+				break
+			}
+		}
+	}
+	//DPrintf("length: %v", rf.logs)
+	if len(args.Entries) != 0 {
+		DPrintf("%v receive %v from leader", rf.me, args.Entries)
+	}
 	reply.Success = true
 	reply.NextIndex = rf.GetLastIndex() + 1
 	if args.LeaderCommit > rf.commitIndex {
@@ -268,7 +284,7 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 		}
 		if reply.Success {
 			if len(args.Entries) > 0 {
-				rf.nextIndex[server] += len(args.Entries)
+				rf.nextIndex[server] = reply.NextIndex
 				rf.matchIndex[server] = rf.nextIndex[server] - 1
 			}
 		} else {
@@ -297,9 +313,11 @@ func (rf *Raft) BroadcastAppendEntries() {
 		}
 	}
 	if commit != rf.commitIndex {
+		DPrintf("leader %v commit log to %v", rf.me, rf.commitIndex)
 		rf.chanCommit <- true
 		rf.commitIndex = commit
 	}
+	DPrintf("leader %v state with %v is broadcasting message",rf.me,rf.logs)
 	for k := range rf.peers {
 		if k != rf.me && rf.state == STATE_LEADER {
 			logIndex := rf.nextIndex[k] - 1
@@ -310,6 +328,9 @@ func (rf *Raft) BroadcastAppendEntries() {
 			args := &AppendEntriesArgs{Term: rf.currentTerm, LeaderIndex: rf.me, LeaderCommit: rf.commitIndex, LastLogIndex: logIndex, LastLogTerm: logTerm}
 			args.Entries = make([]Log, len(rf.logs[args.LastLogIndex+1:]))
 			copy(args.Entries, rf.logs[args.LastLogIndex+1:])
+			if len(args.Entries) != 0 {
+				DPrintf("leader %v send %v to %v", rf.me, args.Entries, k)
+			}
 			reply := &AppendEntriesReply{}
 			go func(args *AppendEntriesArgs, k int) {
 				rf.sendAppendEntries(k, args, reply)
@@ -321,7 +342,7 @@ func (rf *Raft) BroadcastAppendEntries() {
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	index := rf.GetLastIndex()+1
+	index := rf.GetLastIndex() + 1
 	term := rf.currentTerm
 	isLeader := rf.state == STATE_LEADER
 	if isLeader {
@@ -351,7 +372,7 @@ func (rf *Raft) FollowerState() {
 	select {
 	case <-rf.chanHeartBeat:
 	case <-rf.chanGrantVote:
-	case <-time.After(time.Duration(rand.Intn(300)+200) * time.Millisecond):
+	case <-time.After(time.Duration(rand.Intn(300)+800) * time.Millisecond):
 		rf.state = STATE_CANDIDATE
 	}
 }
@@ -361,11 +382,13 @@ func (rf *Raft) CandidateState() {
 	rf.currentTerm++
 	rf.votedFor = rf.me
 	rf.voteCount = 1
+	DPrintf("%v want to be a leader!", rf.me)
 	rf.persist()
 	go rf.BroadcastRequestVote()
 	select {
 	case <-rf.chanBecomeLeader:
 		rf.state = STATE_LEADER
+		DPrintf("%v become a leader!", rf.me)
 		rf.nextIndex = []int{}
 		rf.matchIndex = []int{}
 		for range rf.peers {
@@ -373,8 +396,9 @@ func (rf *Raft) CandidateState() {
 			rf.matchIndex = append(rf.matchIndex, 0)
 		}
 		rf.BroadcastAppendEntries()
-	case <-time.After(time.Duration(rand.Intn(300)+200) * time.Millisecond):
+	case <-time.After(400 * time.Millisecond):
 	case <-rf.chanHeartBeat:
+		DPrintf("%v fail to be a leader!", rf.me)
 		rf.state = STATE_FOLLOWER
 	}
 }
@@ -390,7 +414,7 @@ func (rf *Raft) DoingCommit(applyCh chan ApplyMsg) {
 		case <-rf.chanCommit:
 			for i := rf.lastApplied + 1; i <= rf.commitIndex; i++ {
 				msg := ApplyMsg{Index: i, Command: rf.logs[i].Command}
-				DPrintf("%v applied", msg)
+				DPrintf("%v apply msg %v in array size %v,which should commit to %v", rf.me, msg, len(rf.logs)-1, rf.commitIndex)
 				applyCh <- msg
 				rf.lastApplied = i
 			}
@@ -405,14 +429,13 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.persister = persister
 	rf.me = me
 	rf.state = STATE_FOLLOWER
-	DPrintf("set %v's state to follower2", rf.me)
 	rf.logs = append(rf.logs, Log{Term: 0})
 	rf.chanBecomeLeader = make(chan bool)
 	rf.chanHeartBeat = make(chan bool)
 	rf.chanCommit = make(chan bool)
 	rf.chanGrantVote = make(chan bool)
 	rf.chanApply = make(chan ApplyMsg)
-	//DPrintf("%v inited\n", me)
+	DPrintf("%v inited\n", me)
 	rf.readPersist(persister.ReadRaftState())
 	go rf.Loop()
 	go rf.DoingCommit(applyCh)
