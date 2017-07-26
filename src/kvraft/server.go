@@ -27,7 +27,6 @@ type Op struct {
 }
 
 type RaftKV struct {
-	mu      sync.Mutex
 	me      int
 	rf      *raft.Raft
 	applyCh chan raft.ApplyMsg
@@ -36,7 +35,9 @@ type RaftKV struct {
 
 	db      map[string]string
 	opMap   map[int64]Op
+	opMu	sync.RWMutex
 	chanMap map[int64]chan Op
+	chanMu	sync.Mutex
 }
 
 func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
@@ -46,29 +47,31 @@ func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 		ID:     args.ID,
 		SeenID: args.SeenID,
 	}
-	kv.mu.Lock()
+	kv.opMu.RLock()
 	if lastOp, exist := kv.opMap[args.ID]; exist {
+		kv.opMu.RUnlock()
 		reply.WrongLeader = false
 		reply.Err = OK
 		reply.Value = lastOp.Value
-		kv.mu.Unlock()
 		return
 	}
+	kv.opMu.RUnlock()
 	resultCh := make(chan Op, 1)
-
+	kv.chanMu.Lock()
 	if _, exist := kv.chanMap[args.ID]; !exist {
 		kv.chanMap[args.ID] = resultCh
 	} else {
+		resultCh = kv.chanMap[args.ID]
 		DPrintf("chan Op for ID %v exists", args.ID)
 	}
-	kv.mu.Unlock()
+	kv.chanMu.Unlock()
 	_, _, isLeader := kv.rf.Start(entry)
 	reply.WrongLeader = !isLeader
 	if reply.WrongLeader {
 		reply.Err = "not a leader"
-		kv.mu.Lock()
+		kv.chanMu.Lock()
 		delete(kv.chanMap, args.ID)
-		kv.mu.Unlock()
+		kv.chanMu.Unlock()
 		return
 	}
 	select {
@@ -78,9 +81,9 @@ func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 		return
 	case <-time.After(time.Duration(1000) * time.Millisecond):
 		reply.Err = "timeout"
-		kv.mu.Lock()
+		kv.chanMu.Lock()
 		delete(kv.chanMap, args.ID)
-		kv.mu.Unlock()
+		kv.chanMu.Unlock()
 	}
 }
 
@@ -92,29 +95,30 @@ func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		ID:     args.ID,
 		SeenID: args.SeenID,
 	}
-	kv.mu.Lock()
+	kv.opMu.RLock()
 	if _, exist := kv.opMap[args.ID]; exist {
+		kv.opMu.RUnlock()
 		reply.WrongLeader = false
 		reply.Err = OK
-		kv.mu.Unlock()
 		return
 	}
+	kv.opMu.RUnlock()
 	resultCh := make(chan Op, 1)
-
+	kv.chanMu.Lock()
 	if _, exist := kv.chanMap[args.ID]; !exist {
 		kv.chanMap[args.ID] = resultCh
 	} else {
 		DPrintf("chan Op for ID %v exists", args.ID)
 	}
-	kv.mu.Unlock()
+	kv.chanMu.Unlock()
 	index, _, isLeader := kv.rf.Start(entry)
 	DPrintf("Response (ID:%v) server RPC ID: %v, Index: %v, isLeader: %v", kv.me, args.ID, index, isLeader)
 	reply.WrongLeader = !isLeader
 	if reply.WrongLeader {
 		reply.Err = "not a leader"
-		kv.mu.Lock()
+		kv.chanMu.Lock()
 		delete(kv.chanMap, args.ID)
-		kv.mu.Unlock()
+		kv.chanMu.Unlock()
 		return
 	}
 	select {
@@ -123,9 +127,9 @@ func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		return
 	case <-time.After(time.Duration(1000) * time.Millisecond):
 		reply.Err = "timeout"
-		kv.mu.Lock()
+		kv.chanMu.Lock()
 		delete(kv.chanMap, args.ID)
-		kv.mu.Unlock()
+		kv.chanMu.Unlock()
 	}
 }
 
@@ -156,9 +160,10 @@ func (kv *RaftKV) Kill() {
 
 func (kv *RaftKV) DoingStateMachine() {
 	for msg := range kv.applyCh {
-		kv.mu.Lock()
 		op := msg.Command.(Op)
+		kv.opMu.Lock()
 		delete(kv.opMap, op.SeenID)
+		kv.opMu.Unlock()
 		if lastOp, exist := kv.opMap[op.ID]; exist {
 			DPrintf("Found duplicated op: %v", lastOp)
 			op.Value = lastOp.Value
@@ -176,18 +181,21 @@ func (kv *RaftKV) DoingStateMachine() {
 						kv.db[op.Key] = op.Value
 					}
 				}
+				kv.opMu.Lock()
 				kv.opMap[op.ID] = op
+				kv.opMu.Unlock()
 			}
 		}
+		kv.chanMu.Lock()
 		if ch, exist := kv.chanMap[op.ID]; exist {
 			delete(kv.chanMap, op.SeenID)
+			kv.chanMu.Unlock()
 			go func() {
 				ch <- op
 			}()
 		} else {
-			//kv.chanMap[op.ID] = make(chan Op)
+			kv.chanMu.Unlock()
 		}
-		kv.mu.Unlock()
 	}
 }
 
