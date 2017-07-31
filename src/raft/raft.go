@@ -372,7 +372,7 @@ func (rf *Raft) FollowerState() {
 	select {
 	case <-rf.chanHeartBeat:
 	case <-rf.chanGrantVote:
-	case <-time.After(time.Duration(rand.Intn(300)+800) * time.Millisecond):
+	case <-time.After(time.Duration(rand.Intn(300)+200) * time.Millisecond):
 		rf.state = STATE_CANDIDATE
 	}
 }
@@ -396,7 +396,7 @@ func (rf *Raft) CandidateState() {
 			rf.matchIndex = append(rf.matchIndex, 0)
 		}
 		rf.BroadcastAppendEntries()
-	case <-time.After(400 * time.Millisecond):
+	case <-time.After(300 * time.Millisecond):
 	case <-rf.chanHeartBeat:
 		DPrintf("%v fail to be a leader!", rf.me)
 		rf.state = STATE_FOLLOWER

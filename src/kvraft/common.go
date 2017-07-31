@@ -13,7 +13,7 @@ type PutAppendArgs struct {
 	Value     string
 	Op        string // "Put" or "Append"
 	ID        int64
-	SeenID int64
+	RequestID int
 }
 
 type PutAppendReply struct {
@@ -24,7 +24,7 @@ type PutAppendReply struct {
 type GetArgs struct {
 	Key       string
 	ID        int64
-	SeenID int64
+	RequestID int
 }
 
 type GetReply struct {

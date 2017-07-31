@@ -4,14 +4,14 @@ import "labrpc"
 import "crypto/rand"
 import "math/big"
 import "sync"
-import mrand "math/rand"
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
 	// You will have to modify this struct.
-	leader int
-	SeenID int64
-	mu     sync.Mutex
+	mu        sync.Mutex
+	leaderID  int
+	ID        int64
+	requestID int
 }
 
 func nrand() int64 {
@@ -24,7 +24,9 @@ func nrand() int64 {
 func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
-	ck.leader = 0
+	ck.leaderID = 0
+	ck.requestID = 0
+	ck.ID = nrand()
 	// You'll have to add code here.
 	return ck
 }
@@ -42,40 +44,37 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 // arguments. and reply must be passed as a pointer.
 //
 func (ck *Clerk) Get(key string) string {
+	ck.mu.Lock()
+	defer ck.mu.Unlock()
 	args := GetArgs{
-		Key:    key,
-		ID:     nrand(),
-		SeenID: ck.SeenID,
+		Key:       key,
+		ID:        ck.ID,
+		RequestID: ck.requestID,
 	}
-	leader := -1
-	for {
-		if leader < 0 {
-			leader = ck.leader
-		} else {
-			next := leader
-			for leader == next {
-				leader = mrand.Intn(len(ck.servers))
-			}
-		}
-		var reply GetReply
-		ok := ck.servers[leader].Call("RaftKV.Get", &args, &reply)
+	ck.requestID++
+	ret := ""
+	for i := ck.leaderID; ; i = (i + 1) % len(ck.servers) {
+		reply := GetReply{}
+		ok := ck.servers[i].Call("RaftKV.Get", &args, &reply)
 		if ok {
-			if reply.WrongLeader {
-				DPrintf("Get (ID:%v) error %v", args.ID, reply.Err)
-				continue
+			if !reply.WrongLeader {
+				ck.leaderID = i
+				if reply.Err == OK {
+					ret = reply.Value
+					DPrintf("Get (ID:%v) success", args.ID)
+					break
+				} else {
+					DPrintf("Get (ID:%v) error: %v", args.ID, reply.Err)
+				}
+			} else {
+				DPrintf("Get (ID:%v) error: %v is Not Leader", args.ID, i)
 			}
-			if reply.Err != OK {
-				DPrintf("Get (ID:%v) error %v", args.ID, reply.Err)
-				continue
-			}
-			DPrintf("Get (ID:%v) success", args.ID)
-			ck.SeenID = args.ID
-			ck.leader = leader
-			return reply.Value
 		} else {
-			DPrintf("Get (ID:%v) RPC fail", args.ID)
+			DPrintf("Get (ID:%v) error: RPC Error", args.ID)
 		}
 	}
+	DPrintf("return : %v", ret)
+	return ret
 }
 
 //
@@ -88,42 +87,37 @@ func (ck *Clerk) Get(key string) string {
 // must match the declared types of the RPC handler function's
 // arguments. and reply must be passed as a pointer.
 func (ck *Clerk) PutAppend(key string, value string, op string) {
+	DPrintf("				receive command %v %v %v", key, value, op)
+	ck.mu.Lock()
+	defer ck.mu.Unlock()
 	args := PutAppendArgs{
-		Key:    key,
-		Value:  value,
-		ID:     nrand(),
-		Op:     op,
-		SeenID: ck.SeenID,
+		Key:       key,
+		Value:     value,
+		Op:        op,
+		ID:        ck.ID,
+		RequestID: ck.requestID,
 	}
-	leader := -1
-	for {
-		if leader < 0 {
-			leader = ck.leader
-		} else {
-			record := leader
-			for leader == record {
-				leader = mrand.Intn(len(ck.servers))
-			}
-		}
-		var reply PutAppendReply
-		ok := ck.servers[leader].Call("RaftKV.PutAppend", &args, &reply)
+	ck.requestID++
+	for i := ck.leaderID; ; i = (i + 1) % len(ck.servers) {
+		reply := PutAppendReply{}
+		ok := ck.servers[i].Call("RaftKV.PutAppend", &args, &reply)
 		if ok {
-			if reply.WrongLeader {
-				DPrintf("PutAppend (ID:%v) error %v", args.ID, reply.Err)
-				continue
+			if !reply.WrongLeader {
+				ck.leaderID = i
+				if reply.Err == OK {
+					DPrintf("PutAppend (ID:%v) success", args.ID)
+					break
+				} else {
+					DPrintf("PutAppend (ID:%v) error: %v", args.ID, reply.Err)
+				}
+			} else {
+				DPrintf("PutAppend (ID:%v) error: %v is Not Leader", args.ID, i)
 			}
-			if reply.Err != OK {
-				DPrintf("PutAppend (ID:%v) error %v", args.ID, reply.Err)
-				continue
-			}
-			DPrintf("PutAppend (ID:%v) success", args.ID)
-			ck.SeenID = args.ID
-			ck.leader = leader
-			return
 		} else {
-			DPrintf("PutAppend (ID:%v) RPC fail", args.ID)
+			DPrintf("PutAppend (ID:%v) error: RPC Error", args.ID)
 		}
 	}
+	return
 }
 
 func (ck *Clerk) Put(key string, value string) {
